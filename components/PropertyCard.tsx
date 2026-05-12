@@ -15,6 +15,7 @@ export default function PropertyCard({
 }) {
   const router = useRouter();
   const isSaved=true;
+  const imageUrl = property.images?.[0];
 
   return (
     <TouchableOpacity
@@ -31,7 +32,11 @@ export default function PropertyCard({
     >
       {/* Image */}
       <Image
-        source={{ uri: property.images[0] }}
+         source={
+            imageUrl
+            ? { uri: imageUrl }
+            : require("@/assets/images/kribb.png")
+        }
         className="w-28 h-28"
         resizeMode="cover"
       />

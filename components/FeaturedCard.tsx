@@ -6,6 +6,7 @@ import { Image, Text, TouchableOpacity, View } from "react-native";
 
 export default function FeaturedCard({ property }: { property: Property }) {
   const router = useRouter();
+  const imageUrl = property.images?.[0];
 
   return (
     <TouchableOpacity
@@ -22,7 +23,11 @@ export default function FeaturedCard({ property }: { property: Property }) {
     >
       {/* Image */}
       <Image
-        source={{ uri: property.images[0] }}
+        source={
+            imageUrl
+            ? { uri: imageUrl }
+            : require("@/assets/images/kribb.png")
+        }
         className="w-full h-44"
         resizeMode="cover"
       />

@@ -18,26 +18,49 @@ export default function HomeScreen() {
   const [featured, setFeatured] = useState<Property[]>([]);
   const [recommended, setRecommended] = useState<Property[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
 
   const fetchProperties = async () => {
     setLoading(true);
+    setError(null);
 
-    const { data: featuredData } = await supabase
-      .from("properties")
-      .select("*")
-      .eq("is_featured", true)
-      .order("created_at", { ascending: false });
+    try {
+      const featuredResponse = await supabase
+        .from("properties")
+        .select("*")
+        .eq("is_featured", true)
+        .order("created_at", { ascending: false });
 
-    const { data: recommendedData } = await supabase
-      .from("properties")
-      .select("*")
-      .eq("is_featured", false)
-      .order("created_at", { ascending: false });
+      if (featuredResponse.error) {
+        setError(`Failed to load featured properties: ${featuredResponse.error.message}`);
+        setFeatured([]);
+        setRecommended([]);
+        return;
+      }
 
-    setFeatured(featuredData ?? []);
-    setRecommended(recommendedData ?? []);
-    setLoading(false);
+      const recommendedResponse = await supabase
+        .from("properties")
+        .select("*")
+        .eq("is_featured", false)
+        .order("created_at", { ascending: false });
+
+      if (recommendedResponse.error) {
+        setError(`Failed to load recommended properties: ${recommendedResponse.error.message}`);
+        setFeatured([]);
+        setRecommended([]);
+        return;
+      }
+
+      setFeatured(featuredResponse.data ?? []);
+      setRecommended(recommendedResponse.data ?? []);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to load properties");
+      setFeatured([]);
+      setRecommended([]);
+    } finally {
+      setLoading(false);
+    }
   };
 
 
@@ -127,15 +150,16 @@ export default function HomeScreen() {
               Recommended
             </Text>
 
+            {error ? (
+              <Text className="text-red-500 px-5 mb-4">{error}</Text>
+            ) : null}
+
           </View>
         }
 
         renderItem={({item})=>(
           <View className="px-5 mb-3">
-            <Text>
-              <PropertyCard property={item} />
-            </Text>
-
+            <PropertyCard property={item} />
           </View>
         )}
 
