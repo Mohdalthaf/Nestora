@@ -1,10 +1,12 @@
-import { TAB_SCROLL_BOTTOM_PADDING, TabScreen } from "@/components/TabScreen";
 import { useSupabase } from "@/hooks/useSupabase";
+import { useUserStore } from "@/store/userStore";
+import { Property } from "@/types";
+import { useAuth } from "@clerk/expo";
 import { Ionicons } from "@expo/vector-icons";
 import * as ImagePicker from "expo-image-picker";
 import * as Location from "expo-location";
-import { useRouter } from "expo-router";
-import { useState } from "react";
+import { Redirect, useLocalSearchParams, useRouter } from "expo-router";
+import { useEffect, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -17,6 +19,7 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
 
 const TYPES = ["apartment", "house", "villa", "studio"] as const;
 type PropertyType = (typeof TYPES)[number];
@@ -43,43 +46,105 @@ interface FormState {
   latitude: string;
   longitude: string;
   isFeatured: boolean;
+  isSold: boolean;
   images: string[];
   localImages: string[];
 }
 
-const INITIAL_FORM: FormState = {
-  title: "",
-  description: "",
-  price: "",
-  type: "apartment",
-  bedrooms: 1,
-  bathrooms: 1,
-  areaSqft: "",
-  address: "",
-  city: "",
-  latitude: "",
-  longitude: "",
-  isFeatured: false,
-  images: [],
-  localImages: [],
-};
+function normalizeType(raw: string | null | undefined): PropertyType {
+  const t = (raw ?? "apartment").toLowerCase();
+  return (TYPES as readonly string[]).includes(t) ? (t as PropertyType) : "apartment";
+}
 
-export default function CreatePropertyScreen() {
+function propertyToForm(p: Property): FormState {
+  const imgs = Array.isArray(p.images) ? p.images.filter(Boolean) : [];
+  return {
+    title: p.title ?? "",
+    description: p.description ?? "",
+    price: String(p.price ?? ""),
+    type: normalizeType(p.type),
+    bedrooms: Math.max(1, p.bedrooms ?? 1),
+    bathrooms: Math.max(1, p.bathrooms ?? 1),
+    areaSqft: p.area_sqft != null ? String(p.area_sqft) : "",
+    address: p.address ?? "",
+    city: p.city ?? "",
+    latitude: p.latitude != null ? String(p.latitude) : "",
+    longitude: p.longitude != null ? String(p.longitude) : "",
+    isFeatured: Boolean(p.is_featured),
+    isSold: Boolean(p.is_sold),
+    images: imgs as string[],
+    localImages: imgs as string[],
+  };
+}
+
+export default function UpdatePropertyScreen() {
   const router = useRouter();
+  const { isLoaded } = useAuth();
+  const isAdmin = useUserStore((state) => state.isAdmin);
+  const rawId = useLocalSearchParams<{ id: string }>().id;
+  const id = Array.isArray(rawId) ? rawId[0] : rawId;
+
   const authSupabase = useSupabase();
 
-  const [form, setForm] = useState<FormState>(INITIAL_FORM);
+  const [form, setForm] = useState<FormState | null>(null);
+  const [loadState, setLoadState] = useState<
+    "loading" | "ready" | "forbidden" | "notfound" | "missing"
+  >("loading");
 
-  // Loading states
   const [submitting, setSubmitting] = useState(false);
   const [uploadingImages, setUploadingImages] = useState(false);
   const [detectingLocation, setDetectingLocation] = useState(false);
 
   const updateForm = (fields: Partial<FormState>) =>
-    setForm((prev) => ({ ...prev, ...fields }));
+    setForm((prev) => (prev ? { ...prev, ...fields } : prev));
 
-  // ─── Image Picker ──────────────────────────────────────────
+  useEffect(() => {
+    if (!id) {
+      setLoadState("missing");
+      return;
+    }
+
+    if (!isLoaded) {
+      setLoadState("loading");
+      return;
+    }
+
+    let cancelled = false;
+
+    (async () => {
+      setLoadState("loading");
+      setForm(null);
+
+      if (!isAdmin) {
+        if (!cancelled) setLoadState("forbidden");
+        return;
+      }
+
+      const { data: row, error } = await authSupabase
+        .from("properties")
+        .select("*")
+        .eq("id", id)
+        .single();
+
+      if (cancelled) return;
+
+      if (error || !row) {
+        setLoadState("notfound");
+        return;
+      }
+
+      setForm(propertyToForm(row as Property));
+      setLoadState("ready");
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [id, isAdmin, isLoaded]);
+
   const handlePickImages = async () => {
+    if (!form) return;
+
     const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (!permission.granted) {
       Alert.alert(
@@ -142,13 +207,13 @@ export default function CreatePropertyScreen() {
   };
 
   const handleRemoveImage = (index: number) => {
+    if (!form) return;
     updateForm({
       images: form.images.filter((_, i) => i !== index),
       localImages: form.localImages.filter((_, i) => i !== index),
     });
   };
 
-  // ─── Location Detection ────────────────────────────────────
   const handleDetectLocation = async () => {
     setDetectingLocation(true);
     try {
@@ -169,15 +234,16 @@ export default function CreatePropertyScreen() {
         latitude: String(location.coords.latitude),
         longitude: String(location.coords.longitude),
       });
-    } catch (err) {
+    } catch {
       Alert.alert("Error", "Could not detect location. Enter manually.");
     } finally {
       setDetectingLocation(false);
     }
   };
 
-  // ─── Submit ────────────────────────────────────────────────
   const handleSubmit = async () => {
+    if (!form || !id) return;
+
     if (!form.title.trim())
       return Alert.alert("Validation", "Title is required.");
 
@@ -198,42 +264,50 @@ export default function CreatePropertyScreen() {
     if (!form.city.trim())
       return Alert.alert("Validation", "City is required.");
     if (form.images.length === 0)
-      return Alert.alert("Validation", "Please upload at least one image.");
+      return Alert.alert("Validation", "Please keep at least one image.");
 
     setSubmitting(true);
 
-    const { error } = await authSupabase.from("properties").insert({
-      title: form.title.trim(),
-      description: form.description.trim(),
-      price: priceNum,
-      type: form.type,
-      bedrooms: form.bedrooms,
-      bathrooms: form.bathrooms,
-      area_sqft: form.areaSqft ? Number(form.areaSqft) : null,
-      address: form.address.trim(),
-      city: form.city.trim(),
-      latitude: form.latitude ? Number(form.latitude) : null,
-      longitude: form.longitude ? Number(form.longitude) : null,
-      images: form.images,
-      is_featured: form.isFeatured,
-      is_sold: false,
-    });
+    const { error } = await authSupabase
+      .from("properties")
+      .update({
+        title: form.title.trim(),
+        description: form.description.trim(),
+        price: priceNum,
+        type: form.type,
+        bedrooms: form.bedrooms,
+        bathrooms: form.bathrooms,
+        area_sqft: form.areaSqft ? Number(form.areaSqft) : null,
+        address: form.address.trim(),
+        city: form.city.trim(),
+        latitude: form.latitude ? Number(form.latitude) : null,
+        longitude: form.longitude ? Number(form.longitude) : null,
+        images: form.images,
+        is_featured: form.isFeatured,
+        is_sold: form.isSold,
+      })
+      .eq("id", id);
 
     setSubmitting(false);
 
     if (error) {
-      Alert.alert("Error", "Failed to create property. Please try again.");
+      Alert.alert("Error", "Failed to update property. Please try again.");
       console.error(error);
       return;
     }
 
-    setForm(INITIAL_FORM);
-    Alert.alert("Success! 🎉", "Property listed successfully.", [
-      { text: "OK", onPress: () => router.replace("/(root)/(tabs)") },
+    Alert.alert("Saved", "Property details were updated.", [
+      {
+        text: "OK",
+        onPress: () =>
+          router.replace({
+            pathname: "/(root)/property/[id]",
+            params: { id },
+          }),
+      },
     ]);
   };
 
-  // ─── UI Helpers ────────────────────────────────────────────
   const Counter = ({
     label,
     value,
@@ -312,28 +386,74 @@ export default function CreatePropertyScreen() {
     </TouchableOpacity>
   );
 
+  if (loadState === "forbidden") {
+    return <Redirect href="/(root)/(tabs)" />;
+  }
+
+  if (loadState === "missing") {
+    return (
+      <SafeAreaView className="flex-1 bg-gray-50 dark:bg-neutral-950 items-center justify-center px-6">
+        <Text className="text-gray-600 dark:text-neutral-400 text-center mb-4">
+          No property was selected.
+        </Text>
+        <TouchableOpacity
+          onPress={() => router.back()}
+          className="bg-blue-600 px-5 py-3 rounded-2xl"
+        >
+          <Text className="text-white font-semibold">Go back</Text>
+        </TouchableOpacity>
+      </SafeAreaView>
+    );
+  }
+
+  if (loadState === "notfound") {
+    return (
+      <SafeAreaView className="flex-1 bg-gray-50 dark:bg-neutral-950 items-center justify-center px-6">
+        <Text className="text-gray-600 dark:text-neutral-400 text-center mb-4">
+          This property could not be loaded.
+        </Text>
+        <TouchableOpacity
+          onPress={() => router.replace("/(root)/(tabs)")}
+          className="bg-blue-600 px-5 py-3 rounded-2xl"
+        >
+          <Text className="text-white font-semibold">Home</Text>
+        </TouchableOpacity>
+      </SafeAreaView>
+    );
+  }
+
+  if (loadState === "loading" || !form) {
+    return (
+      <SafeAreaView className="flex-1 bg-gray-50 dark:bg-neutral-950 items-center justify-center">
+        <ActivityIndicator size="large" color="#2563EB" />
+      </SafeAreaView>
+    );
+  }
+
   return (
-    <TabScreen>
+    <SafeAreaView className="flex-1 bg-gray-50 dark:bg-neutral-950">
       <KeyboardAvoidingView
         behavior={Platform.OS === "ios" ? "padding" : "height"}
         className="flex-1"
       >
+        <View className="flex-row items-center px-5 pt-4 pb-3 gap-3">
+          <TouchableOpacity
+            onPress={() => router.back()}
+            className="w-10 h-10 items-center justify-center rounded-full bg-white dark:bg-neutral-900 border border-gray-200 dark:border-neutral-700"
+            hitSlop={12}
+          >
+            <Ionicons name="chevron-back" size={22} color="#111827" />
+          </TouchableOpacity>
+          <Text className="text-2xl font-bold text-gray-900 dark:text-white flex-1">
+            Edit property
+          </Text>
+        </View>
+
         <ScrollView
-          className="flex-1"
-          contentContainerStyle={{
-            padding: 20,
-            paddingBottom: TAB_SCROLL_BOTTOM_PADDING,
-          }}
+          contentContainerStyle={{ padding: 20, paddingBottom: 120 }}
           showsVerticalScrollIndicator={false}
           keyboardShouldPersistTaps="handled"
         >
-          <View className="flex-row items-center pb-3">
-            <Text className="text-2xl font-bold text-gray-900 dark:text-white flex-1">
-              Add Property
-            </Text>
-          </View>
-
-          {/* Images */}
           <View className={sectionClass}>
             <Text className={labelClass}>
               Photos{" "}
@@ -344,7 +464,7 @@ export default function CreatePropertyScreen() {
 
             <View className="flex-row flex-wrap gap-3">
               {form.localImages.map((uri, index) => (
-                <View key={index} className="relative">
+                <View key={`${uri}-${index}`} className="relative">
                   <Image
                     source={{ uri }}
                     className="w-24 h-24 rounded-2xl"
@@ -391,7 +511,6 @@ export default function CreatePropertyScreen() {
             </View>
           </View>
 
-          {/* Basic Info */}
           <View className={sectionClass}>
             <Text className={labelClass}>Title</Text>
             <TextInput
@@ -416,7 +535,6 @@ export default function CreatePropertyScreen() {
             />
           </View>
 
-          {/* Price */}
           <View className={sectionClass}>
             <Text className={labelClass}>Price (₹)</Text>
             <TextInput
@@ -432,7 +550,6 @@ export default function CreatePropertyScreen() {
             </Text>
           </View>
 
-          {/* Property Type */}
           <View className={sectionClass}>
             <Text className={labelClass}>Property Type</Text>
             <View className="flex-row flex-wrap gap-2">
@@ -460,7 +577,6 @@ export default function CreatePropertyScreen() {
             </View>
           </View>
 
-          {/* Bedrooms / Bathrooms */}
           <View className="flex-row gap-4 mb-5">
             <Counter
               label="Bedrooms"
@@ -486,7 +602,6 @@ export default function CreatePropertyScreen() {
             />
           </View>
 
-          {/* Location */}
           <View className={sectionClass}>
             <Text className={labelClass}>Address</Text>
             <TextInput
@@ -509,7 +624,6 @@ export default function CreatePropertyScreen() {
             />
           </View>
 
-          {/* Coordinates */}
           <View className={sectionClass}>
             <View className="flex-row items-center justify-between mb-1.5">
               <Text className={labelClass}>Coordinates</Text>
@@ -553,7 +667,6 @@ export default function CreatePropertyScreen() {
             </View>
           </View>
 
-          {/* Toggles */}
           <View className="gap-3 mb-5">
             <Toggle
               label="Featured Property"
@@ -561,9 +674,14 @@ export default function CreatePropertyScreen() {
               value={form.isFeatured}
               onChange={(v) => updateForm({ isFeatured: v })}
             />
+            <Toggle
+              label="Mark as sold"
+              description="Hide from active listings when sold"
+              value={form.isSold}
+              onChange={(v) => updateForm({ isSold: v })}
+            />
           </View>
 
-          {/* Submit */}
           <TouchableOpacity
             onPress={handleSubmit}
             disabled={submitting || uploadingImages}
@@ -581,12 +699,12 @@ export default function CreatePropertyScreen() {
               <ActivityIndicator color="white" />
             ) : (
               <Text className="text-white font-bold text-base">
-                List Property
+                Save changes
               </Text>
             )}
           </TouchableOpacity>
         </ScrollView>
       </KeyboardAvoidingView>
-    </TabScreen>
+    </SafeAreaView>
   );
 }

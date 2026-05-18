@@ -1,3 +1,4 @@
+import { useSavedProperty } from "@/hooks/useSavedProperty";
 import { formatPrice } from "@/lib/utils";
 import { Property } from "@/types";
 import { Ionicons } from "@expo/vector-icons";
@@ -7,20 +8,23 @@ import { Image, Text, TouchableOpacity, View } from "react-native";
 export default function PropertyCard({
   property,
   onUnsave,
-  showSave = true,
+  showSave = false,
 }: {
   property: Property;
   onUnsave?: () => void;
   showSave?: boolean;
 }) {
   const router = useRouter();
-  const isSaved=true;
   const imageUrl = property.images?.[0];
+  const { isSaved, saveLoading, toggleSave } = useSavedProperty(
+    property.id,
+    onUnsave
+  );
 
   return (
     <TouchableOpacity
-    //   onPress={() => router.push(`/(root)/property/${property.id}`)}
-      className="flex-row bg-white rounded-2xl mb-4 overflow-hidden"
+      onPress={() => router.push(`/(root)/property/${property.id}`)}
+      className="flex-row bg-white dark:bg-neutral-900 rounded-2xl mb-4 overflow-hidden border border-gray-100 dark:border-neutral-800"
       style={{
         shadowColor: "#000",
         shadowOffset: { width: 0, height: 1 },
@@ -32,8 +36,8 @@ export default function PropertyCard({
     >
       {/* Image */}
       <Image
-         source={
-            imageUrl
+        source={
+          imageUrl
             ? { uri: imageUrl }
             : require("@/assets/images/kribb.png")
         }
@@ -45,14 +49,14 @@ export default function PropertyCard({
       <View className="flex-1 p-3 justify-between">
         <View>
           <Text
-            className="text-sm font-bold text-gray-800 mb-1"
+            className="text-sm font-bold text-gray-800 dark:text-neutral-100 mb-1"
             numberOfLines={1}
           >
             {property.title}
           </Text>
           <View className="flex-row items-center gap-1">
             <Ionicons name="location-outline" size={11} color="#6B7280" />
-            <Text className="text-xs text-gray-500" numberOfLines={1}>
+            <Text className="text-xs text-gray-500 dark:text-neutral-400" numberOfLines={1}>
               {property.city}
             </Text>
           </View>
@@ -63,20 +67,20 @@ export default function PropertyCard({
             {formatPrice(property.price)}
           </Text>
           {property.is_sold && (
-            <View className="bg-red-50 px-2 py-0.5 rounded-full">
-              <Text className="text-red-500 text-xs font-semibold">Sold</Text>
+            <View className="bg-red-50 dark:bg-red-950/40 px-2 py-0.5 rounded-full">
+              <Text className="text-red-500 dark:text-red-400 text-xs font-semibold">Sold</Text>
             </View>
           )}
           <View className="flex-row gap-3">
             <View className="flex-row items-center gap-1">
               <Ionicons name="bed-outline" size={11} color="#6B7280" />
-              <Text className="text-xs text-gray-500">
+              <Text className="text-xs text-gray-500 dark:text-neutral-400">
                 {property.bedrooms} bd
               </Text>
             </View>
             <View className="flex-row items-center gap-1">
               <Ionicons name="expand-outline" size={11} color="#6B7280" />
-              <Text className="text-xs text-gray-500">
+              <Text className="text-xs text-gray-500 dark:text-neutral-400">
                 {property.area_sqft} ft²
               </Text>
             </View>
@@ -87,8 +91,8 @@ export default function PropertyCard({
       {/* Save Button */}
       {showSave && (
         <TouchableOpacity
-        //   onPress={toggleSave}
-        //   disabled={saveLoading}
+          onPress={toggleSave}
+          disabled={saveLoading}
           className="w-10 items-center pt-3"
         >
           <Ionicons
