@@ -4,7 +4,7 @@
     "slug": "Nestora",
     "version": "1.0.0",
     "orientation": "portrait",
-    "icon": "./assets/images/nestora.png",
+    "icon": "./assets/images/icon.png",
     "scheme": "nestora",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
@@ -53,7 +53,8 @@
             "backgroundColor": "#000000"
           }
         }
-      ]
+      ],
+      "expo-secure-store"
     ],
     "experiments": {
       "typedRoutes": true,
